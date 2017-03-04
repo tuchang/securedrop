@@ -12,6 +12,7 @@ except:
 from sqlalchemy import create_engine, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import scoped_session, sessionmaker, relationship, backref
 from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.ext.hybrid import hybrid_property, Comparator
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, Binary
 from sqlalchemy.orm.exc import MultipleResultsFound, NoResultFound
 
@@ -23,6 +24,7 @@ import qrcode
 import qrcode.image.svg
 
 import config
+from crypto_util import encrypt_label, decrypt_label
 import store
 
 LOGIN_HARDENING = True
@@ -414,25 +416,58 @@ class JournalistLoginAttempt(Base):
     def __init__(self, journalist):
         self.journalist_id = journalist.id
 
+class EncryptedLabelComparator(Comparator):
+    def operate(self, op, other, **kw):
+        return op(self.__clause_element__(), encrypt_label(other), **kw)
 
 class SourceLabelType(Base):
     __tablename__ = "source_label_type"
     id = Column(Integer, primary_key=True)
-    label_text = Column(String(255), nullable=False, unique=True)
+    encrypted_label_text = Column(Binary(255), nullable=False, unique=True)
     source_tags = relationship("SourceTag", order_by="SourceTag.id")
 
-    def __repr__(self):
-        return "<Source Label Type {}>".format(self.label_text)
+    @hybrid_property
+    def label_text(self, key):
+        return decrypt_label(key, self.encrypted_label_text, self.id,
+                             self.__tablename__)
+
+    @label_text.setter
+    def label_text(self, key, text):
+        self.encrypted_label_text = encrypt_label(key, text, self.id,
+                                                  self.__tablename__)
+
+    class encrypt_comparator(Comparator):
+        def operate(self, op, other, **kw):
+            return op(self.__clause_element__(), encrypt_label(other), **kw)
+
+    @label_text.comparator
+    def value(cls):
+        return EncryptedLabelComparator(cls.encrypted_label_text)
+
+    def __str__(self):
+        return "<Source Label Type {}>".format(self.encrypted_label_text)
 
 
 class SubmissionLabelType(Base):
     __tablename__ = "submission_label_type"
     id = Column(Integer, primary_key=True)
-    label_text = Column(String(255), nullable=False, unique=True)
+    encrypted_label_text = Column(Binary(255), nullable=False, unique=True)
     submission_tags = relationship("SubmissionTag", order_by="SubmissionTag.id")
 
-    def __repr__(self):
-        return "<Submission Label Type {}>".format(self.label_text)
+    @hybrid_property
+    def label_text(self, key):
+        return decrypt_label(key, self.encrypted_label_text, self.id, self.table_id) 
+
+    @label_text.setter
+    def label_text(self, key, text):
+        self.encrypted_label_text = encrypt_label(key, text, self.id, self.table_id)
+
+    @label_text.comparator
+    def value(cls):
+        return EncryptedLabelComparator(cls.encrypted_label_text)
+
+    def __str__(self):
+        return "<Submission Label Type {}>".format(self.encrypted_label_text)
 
 
 class SourceTag(Base):

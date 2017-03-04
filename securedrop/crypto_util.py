@@ -2,14 +2,27 @@
 import os
 import subprocess
 from base64 import b32encode
+from zlib import adler32
 
 from Crypto.Random import random
+from Crypto.Cipher import AES
+from Crypto.Util import Counter
 import gnupg
 from gnupg._util import _is_stream, _make_binary_stream
 import scrypt
 
 import config
 import store
+
+def encrypt_label(key, pt, pk, tablename):
+    cipher = AES.new(key, AES.MODE_CTR,
+                     counter=Counter.new(adler32(tablename) + pk*15))
+    return cipher.encrypt(pt)
+
+def decrypt_label(key, ct, pk, tablename):
+    cipher = AES.new(key, AES.MODE_CTR,
+                     counter=Counter.new(adler32(tablename) + pk*15))
+    return cipher.decrypt(ct)
 
 # to fix gpg error #78 on production
 os.environ['USERNAME'] = 'www-data'
